@@ -12,7 +12,7 @@ const OPTS_KEY = 'harTapOpts';
 const HAR_KEY = 'harTapHar';           // the full saved HAR (large; read only on Download)
 const HAR_META_KEY = 'harTapHarMeta';  // {count, wireBytes, bodyBytes, includeBodies} for the summary line
 const OPT_IDS = ['reload', 'nocache', 'bodies'];
-let tab = null, capTabId = null, pollTimer = null;
+let tab = null, capTabId = null, pollTimer = null, uiState = 'idle'; // idle | capturing | ready
 
 const saveOpts = () => chrome.storage.local.set({ [OPTS_KEY]: Object.fromEntries(OPT_IDS.map((id) => [id, $(id).checked])) });
 const setInputsDisabled = (d) => { $('url').disabled = d; for (const id of OPT_IDS) $(id).disabled = d; };
@@ -34,7 +34,8 @@ function cannotAttach(url) {
 }
 const willOpenNewTab = () => cannotAttach(tab && tab.url) && $('reload').checked && $('url').value.trim() !== '';
 // Tell the user, on the button itself, when Start won't capture the current tab but a fresh one.
-function refreshStartLabel() { if (!$('start').disabled) $('start').textContent = willOpenNewTab() ? 'Start in new tab' : 'Start'; }
+// Only in the idle state, where the left button is Start — in the ready state it's the Clear button.
+function refreshStartLabel() { if (uiState === 'idle') $('start').textContent = willOpenNewTab() ? 'Start in new tab' : 'Start'; }
 
 async function init() {
   const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -56,6 +57,7 @@ async function init() {
 
 // --- 3 states across the fixed Start button + the morphing action button ---
 function enterIdle() {
+  uiState = 'idle';
   setBtn('start', 'primary', 'Start', false, start);
   setBtn('action', 'primary', 'Stop', true, null);   // nothing to stop/download yet
   setInputsDisabled(false);
@@ -64,6 +66,7 @@ function enterIdle() {
   refreshStartLabel();
 }
 function enterCapturing(st) {
+  uiState = 'capturing';
   setBtn('start', 'primary', 'Start', true, null);   // Start stays visible, disabled mid-capture
   setBtn('action', 'primary', 'Stop', false, stop);
   setInputsDisabled(true);
@@ -71,11 +74,11 @@ function enterCapturing(st) {
   startPolling();
 }
 function enterReady() {
-  setBtn('start', 'primary', 'Start', false, start);       // Start over, discarding the saved HAR
+  uiState = 'ready';
+  setBtn('start', 'primary', 'Clear', false, doClear);     // discard the saved HAR without downloading
   setBtn('action', 'primary', 'Download', false, doDownload);
   setInputsDisabled(false);
   stopPolling();
-  refreshStartLabel();
 }
 
 function render(st) {
@@ -123,6 +126,12 @@ async function doDownload() {
   await chrome.storage.local.remove([HAR_KEY, HAR_META_KEY]);
   enterIdle();
   setStat(`Downloaded <b>${n}</b> entries → .har`);
+}
+
+function doClear() {
+  chrome.storage.local.remove([HAR_KEY, HAR_META_KEY]); // discard the capture, back to idle
+  enterIdle();
+  setStat('Cleared');
 }
 
 function download(har) {
