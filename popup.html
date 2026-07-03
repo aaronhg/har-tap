@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #ffffff; --surface: #f1f3f4; --text: #202124; --text-2: #5f6368;
+    --border: #dadce0; --primary: #1a73e8; --primary-hover: #185abc; --on-primary: #ffffff;
+    --danger: #d93025; --focus: rgba(26,115,232,.24);
+    --font: 'Roboto', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --mono: 'Roboto Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #202124; --surface: #292a2d; --text: #e8eaed; --text-2: #9aa0a6;
+      --border: #3c4043; --primary: #8ab4f8; --primary-hover: #aecbfa; --on-primary: #202124;
+      --danger: #f28b82; --focus: rgba(138,180,248,.24);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { width: 340px; margin: 0; padding: 16px; font: 13px/1.5 var(--font); background: var(--bg); color: var(--text); }
+  .head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 16px; }
+  h1 { font-size: 15px; font-weight: 500; margin: 0; color: var(--text); flex: none; }
+  .subtitle { margin: 0; font-size: 11px; color: var(--text-2); font-family: var(--mono); }
+  .url-label { display: block; font-size: 11px; font-weight: 500; color: var(--text-2); margin-bottom: 6px; }
+  .url-input { width: 100%; resize: vertical; font: 12px/1.5 var(--mono); background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 16px; transition: border-color .15s, box-shadow .15s; }
+  .url-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--focus); }
+  .url-input:disabled { opacity: .6; }
+  label { display: flex; align-items: center; gap: 10px; margin: 8px 0; cursor: pointer; user-select: none; font-size: 13px; color: var(--text); }
+  input[type=checkbox] { accent-color: var(--primary); width: 16px; height: 16px; margin: 0; cursor: pointer; flex: none; }
+  .row { display: flex; gap: 8px; margin-top: 18px; }
+  button { flex: 1; padding: 9px 12px; border: 1px solid transparent; border-radius: 18px; background: var(--surface); color: var(--text); font: 500 13px var(--font); cursor: pointer; transition: background .15s, box-shadow .15s; }
+  button:disabled { opacity: .38; cursor: default; }
+  button.primary { background: var(--primary); color: var(--on-primary); }
+  button.primary:hover:not(:disabled) { background: var(--primary-hover); box-shadow: 0 1px 3px rgba(60,64,67,.3); }
+  .stat { margin-top: 16px; padding: 10px 12px; background: var(--surface); border-radius: 8px; font-size: 12px; color: var(--text-2); }
+  .stat b { color: var(--primary); font-weight: 600; }
+  .stat.is-err { color: var(--danger); }
+  .hint { color: var(--text-2); font-size: 11px; margin-top: 12px; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <div class="head">
+    <h1>HAR Tap</h1>
+    <span class="subtitle">chrome.debugger Network → .har</span>
+  </div>
+  <label class="url-label" for="url">URL to load on start</label>
+  <textarea id="url" class="url-input" rows="2" spellcheck="false" placeholder="https://…"></textarea>
+
+  <label><input type="checkbox" id="reload" checked> Reload on start (capture from nav start)</label>
+  <label><input type="checkbox" id="nocache" checked> Disable cache (real wire byte sizes)</label>
+  <label><input type="checkbox" id="bodies"> Embed response bodies (base64 in HAR)</label>
+
+  <div class="row">
+    <button id="start" class="primary">Start</button>
+    <button id="action" class="primary" disabled>Stop</button>
+  </div>
+
+  <div class="stat" id="stat">Idle</div>
+  <div class="hint">Attaching shows Chrome's "debugging this browser" bar — expected. One debugger per tab: close DevTools on the target tab first.</div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

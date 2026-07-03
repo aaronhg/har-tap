@@ -1,0 +1,16 @@
+# Captured HAR files — they contain cookies, Authorization/Bearer tokens, session
+# IDs, and full request/response bodies. NEVER commit these.
+*.har
+
+# macOS
+.DS_Store
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+
+# Node (only if build tooling is ever added)
+node_modules/
+npm-debug.log*
+yarn-error.log
