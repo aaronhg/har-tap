@@ -1,36 +1,26 @@
 # HAR Tap
 
-A small **Manifest V3** Chrome extension that captures a tab's network traffic into a standard **HAR 1.2**
-file using the browser's [`chrome.debugger`](https://developer.chrome.com/docs/extensions/reference/api/debugger)
-API. `chrome.debugger` is the same CDP channel DevTools speaks, so the capture uses `Network.enable` +
-`responseReceived`/`loadingFinished` + `getResponseBody` — the exact events the DevTools Network panel shows —
-and includes **cross-origin (OOPIF) iframes**, which a naive top-frame tap misses.
+[![test](https://github.com/aaronhg/har-tap/actions/workflows/test.yml/badge.svg)](https://github.com/aaronhg/har-tap/actions/workflows/test.yml)
 
-It also ships its own **viewer** (`viewer/`): a request table + detail pane with filtering and search — open
-a finished capture straight from the popup (**View**), or drop any `.har` into the page.
+**HAR Tap** records a tab's network traffic into a standard **HAR 1.2** file and ships a zero-install,
+**table-first viewer** to inspect it. The recorder is a small **Manifest V3** Chrome extension built on
+[`chrome.debugger`](https://developer.chrome.com/docs/extensions/reference/api/debugger) — the same CDP
+channel DevTools speaks (`Network.enable` + `responseReceived`/`loadingFinished` + `getResponseBody`) — so it
+captures exactly what the DevTools Network panel sees, including **cross-origin (OOPIF) iframes** that a
+naive top-frame tap misses.
+
+The viewer is a request table + detail pane with filtering and search: open a finished capture straight
+from the popup (**View**), or drop any `.har` from any tool into the page.
 
 **Try the viewer live:** [aaronhg.github.io/har-tap](https://aaronhg.github.io/har-tap/) — drop in a `.har`,
 or jump straight to [the bundled example capture](https://aaronhg.github.io/har-tap/?har=test/fixtures/sample.har)
-(`?har=<url>` deep-links any same-origin/CORS-enabled HAR).
+(`?har=<url>` deep-links any same-origin/CORS-enabled HAR). The viewer is deliberately **table-first** —
+no waterfall: filter, sort, inspect and export, built for finding and reading one request fast.
+
+![HAR Tap viewer — request table with the detail pane open on the example capture](docs/viewer.png)
 
 It is a load-unpacked developer tool. The `debugger` permission draws heavy Web Store review, and personal
 use doesn't need a listing, so this isn't packaged for the store.
-
-## Files
-
-| file | role |
-|---|---|
-| `manifest.json` | MV3, `debugger` + `tabs` + `storage` + `unlimitedStorage` permissions, module service worker |
-| `har.js` | **pure** HAR-entry builder (no `chrome.*`, no Node) — unit-testable in isolation |
-| `background.js` | service worker: owns the `chrome.debugger` session, wires CDP events → `HarTap`, handles OOPIF auto-attach |
-| `popup.html` / `popup.js` | small UI (Start · Stop → Clear·Download·View; URL + checkbox choices persisted; finished HAR saved so it survives reopen) + live counter + Blob download of `<host>.har` |
-| `index.html` + `viewer/viewer.js` / `.css` | the viewer page (the repo root IS the app — it doubles as the GitHub Pages site, no redirect): request table + resizable detail pane (Headers · Payload · Preview · Response · Timing), extension/status/method/text filters, sortable columns, stats footer. A **pure** web page — the only `chrome.*` touch is feature-detected storage read, so it also works from `file://` with drag-and-drop (classic scripts, no ES modules: Chrome blocks module imports on `file://`) |
-| `viewer/lib.js` | the viewer's **pure** helpers (formatting, URL/extension parsing, body classification, CSV) — no DOM, no `chrome.*`, loaded before `viewer.js` |
-| `test/` | `node:test` suites for `har.js` (CDP events → HAR) and `viewer/lib.js`; `npm test`, zero dependencies. `test/fixtures/sample.har` is a 13-entry HAR covering the type/status/body matrix (doubles as the viewer's `?har=` example) |
-
-`har.js`/`background.js` and `viewer/lib.js`/`viewer/viewer.js` are split along the same "pure logic vs.
-browser glue" line: the pure halves run unchanged in Node, where `test/` exercises them — run `npm test`
-(Node's built-in `node:test`, no dependencies to install).
 
 ## Install (load unpacked)
 
@@ -62,15 +52,18 @@ work after you close and reopen the popup. Starting a new capture or downloading
 
 ## Viewer
 
-The viewer (`index.html`) shows a HAR as a **request table** (`#` · Name · Method · Status · Type · Size · Time ·
-Started — every column sortable, Started as an offset from the first request; Type is the URL's file
-extension) with a **detail pane** (Headers · Payload · Preview · Response · Timing tabs; drag the divider to
-resize) and filters on top: URL substring, extension chips built from what's actually in the file (busiest
-first, `(none)` for extension-less requests), status class / "Errors only", and method. `↑`/`↓` walk the
-table, `←`/`→` cycle the detail tabs, `Enter` jumps into the detail pane, `Esc` comes back. **Right-click the header** to choose visible columns and switch the first
-column between **Name / Path / URL** (both persisted); **Export CSV** in the stats bar writes the filtered
-rows in their current order with exactly those columns — machine-friendly values (the first column exports
-whatever mode it shows; sizes in bytes, times in ms).
+The viewer (`index.html`) is a request table with a detail pane:
+
+- **Table** — `#` · Name · Method · Status · Type · Size · Time · Started; every column sortable. Started is
+  the offset from the first request; Type is the URL's file extension. **Right-click the header** to choose
+  visible columns and to switch the first column between **Name / Path / URL** (both persisted).
+- **Filters** — URL substring, file-extension chips built from what's actually in the file (busiest first,
+  `(none)` for extension-less requests), status class / "Errors only", and method.
+- **Detail pane** — Headers · Payload · Preview · Response · Timing tabs; drag the divider to resize.
+- **Keyboard** — `↑`/`↓` walk the table, `←`/`→` cycle the detail tabs, `Enter` jumps into the pane,
+  `Esc` comes back.
+- **Export CSV** (stats bar) — the filtered rows in their current order with exactly the visible columns,
+  machine-friendly values (the first column exports whatever mode it shows; sizes in bytes, times in ms).
 
 **Preview** is the rendered view, DevTools-style — prettified JSON, inline images, `<audio>`/`<video>` players
 playing the *captured* bytes (not a re-fetch) — while **Response** is the raw text plus size/MIME meta; a
@@ -90,6 +83,24 @@ viewer — the root `index.html` is the app, no redirect.
 `?har=<url>` deep-links a HAR: the bundled example is [`/?har=test/fixtures/sample.har`](https://aaronhg.github.io/har-tap/?har=test/fixtures/sample.har)
 (also linked from the empty state); same-origin URLs always work, a cross-origin URL needs that server to
 send CORS headers. Hosted or not, parsing stays entirely in the page — no HAR bytes leave the browser.
+
+## Files
+
+| file | role |
+|---|---|
+| `manifest.json` | MV3, `debugger` + `tabs` + `storage` + `unlimitedStorage` permissions, module service worker |
+| `har.js` | **pure** HAR-entry builder (no `chrome.*`, no Node) — unit-testable in isolation |
+| `background.js` | service worker: owns the `chrome.debugger` session, wires CDP events → `HarTap`, handles OOPIF auto-attach |
+| `popup.html` / `popup.js` | small UI (Start · Stop → Clear·Download·View; URL + checkbox choices persisted; finished HAR saved so it survives reopen) + live counter + Blob download of `<host>.har` |
+| `index.html` + `viewer/viewer.js` / `.css` | the viewer page (the repo root IS the app — it doubles as the GitHub Pages site, no redirect): request table + resizable detail pane (Headers · Payload · Preview · Response · Timing), file-extension/status/method/text filters, sortable columns, stats footer. A **pure** web page — the only `chrome.*` touch is feature-detected storage read, so it also works from `file://` with drag-and-drop (classic scripts, no ES modules: Chrome blocks module imports on `file://`) |
+| `viewer/lib.js` | the viewer's **pure** helpers (formatting, URL/extension parsing, body classification, CSV) — no DOM, no `chrome.*`, loaded before `viewer.js` |
+| `test/` | `node:test` suites for `har.js` (CDP events → HAR) and `viewer/lib.js`; `npm test`, zero dependencies. `test/fixtures/sample.har` is a 13-entry HAR covering the type/status/body matrix (doubles as the viewer's `?har=` example) |
+| `icons/` · `docs/` | extension + favicon PNGs (script-generated, no binary sources) · the README screenshot |
+| `.github/workflows/test.yml` | CI: `npm test` on every push/PR |
+
+`har.js`/`background.js` and `viewer/lib.js`/`viewer/viewer.js` are split along the same "pure logic vs.
+browser glue" line: the pure halves run unchanged in Node, where `test/` exercises them — run `npm test`
+(Node's built-in `node:test`, no dependencies to install).
 
 ## Byte accounting — the warm-cache trap
 
