@@ -1,9 +1,9 @@
-// viewer.js — HAR Tap's viewer page: request table + detail pane, no timeline.
+// viewer.js — HAR Tap's viewer (the repo-root index.html): request table + detail pane, no timeline.
 // A PURE web page (works from file:// or any static host, drop/open any .har); the only chrome.*
 // touch is feature-detected — opened as the extension page it auto-loads the last capture from
 // chrome.storage.local (same HAR_KEY the popup downloads from). All HAR-derived strings go into
 // the DOM via textContent, never innerHTML — HAR bodies/headers are untrusted page content.
-// Pure helpers (formatting, typeOf, urlParts, decodeContent, toCsv, …) live in lib.js, loaded
+// Pure helpers (formatting, extOf, urlParts, decodeContent, toCsv, …) live in lib.js, loaded
 // before this file; both are CLASSIC scripts because Chrome blocks ES modules on file://.
 'use strict';
 
@@ -618,7 +618,7 @@ function wireUi() {
 
 async function boot() {
   wireUi();
-  // ?har=<url> deep-links a HAR (e.g. the hosted demo: viewer.html?har=../test/fixtures/sample.har).
+  // ?har=<url> deep-links a HAR (e.g. the hosted demo: /?har=test/fixtures/sample.har).
   // Same-origin always works; a cross-origin URL needs CORS from that server; file:// can't fetch.
   const src = new URLSearchParams(location.search).get('har');
   if (src) {

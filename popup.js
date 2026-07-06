@@ -1,8 +1,9 @@
 // popup.js — the UI. Reads the active tab, drives start/stop via the service worker, polls live status,
 // and (having a DOM, unlike the SW) turns the saved HAR into a Blob download `<host>.har`.
 // Start is always present; the second button walks Stop → Download after a capture finishes; View (always
-// present) opens viewer/viewer.html — primary when a capture is saved, since the viewer auto-loads it.
-// A finished capture is persisted (by the SW) so View/Download survive closing/reopening the popup.
+// present) opens the viewer (index.html, which doubles as the GitHub Pages root) — primary when a capture
+// is saved, since the viewer auto-loads it. A finished capture is persisted (by the SW) so View/Download
+// survive closing/reopening the popup.
 
 const $ = (id) => document.getElementById(id);
 const msg = (m) => new Promise((res) => chrome.runtime.sendMessage(m, res));
@@ -57,10 +58,10 @@ async function init() {
 }
 
 // --- 3 states across the fixed Start button + the morphing action button ---
-// View is always present and clickable: it opens viewer/viewer.html (the extension's own page).
+// View is always present and clickable: it opens the viewer (the extension's own index.html).
 // With a saved capture it goes primary — the viewer auto-loads the HAR from chrome.storage.local
 // (no download round-trip); without one the viewer opens on its drop-a-file empty state.
-const openViewer = () => chrome.tabs.create({ url: chrome.runtime.getURL('viewer/viewer.html') });
+const openViewer = () => chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
 function enterIdle() {
   uiState = 'idle';
   setBtn('start', 'primary', 'Start', false, start);

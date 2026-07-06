@@ -1,7 +1,7 @@
 // viewer/lib.js — the viewer's PURE helpers: formatting, URL/type/body classification, CSV.
 // No DOM, no chrome.*. Loaded as a CLASSIC script ahead of viewer.js — not an ES module, because
-// Chrome blocks module imports on file:// (null origin) and opening viewer.html straight from
-// disk is a supported way to use the viewer. test/viewer-lib.test.js evaluates this same file
+// Chrome blocks module imports on file:// (null origin) and opening the viewer (root index.html)
+// straight from disk is a supported way to use it. test/viewer-lib.test.js evaluates this same file
 // in Node (new Function), so keep it dependency- and side-effect-free.
 'use strict';
 
