@@ -1,0 +1,8 @@
+{
+  "name": "har-tap",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

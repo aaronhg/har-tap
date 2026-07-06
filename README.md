@@ -6,6 +6,9 @@ API. `chrome.debugger` is the same CDP channel DevTools speaks, so the capture u
 `responseReceived`/`loadingFinished` + `getResponseBody` — the exact events the DevTools Network panel shows —
 and includes **cross-origin (OOPIF) iframes**, which a naive top-frame tap misses.
 
+It also ships its own **viewer** (`viewer/`): a request table + detail pane with filtering and search — open
+a finished capture straight from the popup (**View**), or drop any `.har` into the page.
+
 It is a load-unpacked developer tool. The `debugger` permission draws heavy Web Store review, and personal
 use doesn't need a listing, so this isn't packaged for the store.
 
@@ -16,10 +19,15 @@ use doesn't need a listing, so this isn't packaged for the store.
 | `manifest.json` | MV3, `debugger` + `tabs` + `storage` + `unlimitedStorage` permissions, module service worker |
 | `har.js` | **pure** HAR-entry builder (no `chrome.*`, no Node) — unit-testable in isolation |
 | `background.js` | service worker: owns the `chrome.debugger` session, wires CDP events → `HarTap`, handles OOPIF auto-attach |
-| `popup.html` / `popup.js` | two-button UI (Start · Stop→Download; URL + checkbox choices persisted; finished HAR saved so Download survives reopen) + live counter + Blob download of `<host>.har` |
+| `popup.html` / `popup.js` | small UI (Start · Stop → Clear·Download·View; URL + checkbox choices persisted; finished HAR saved so it survives reopen) + live counter + Blob download of `<host>.har` |
+| `viewer/viewer.html` / `.js` / `.css` | the viewer page: request table + resizable detail pane (Headers · Payload · Preview · Response · Timing), type/status/method/text filters, sortable columns, stats footer. A **pure** web page — the only `chrome.*` touch is feature-detected storage read, so it also works from `file://` with drag-and-drop (classic scripts, no ES modules: Chrome blocks module imports on `file://`) |
+| `viewer/lib.js` | the viewer's **pure** helpers (formatting, URL/extension parsing, body classification, CSV) — no DOM, no `chrome.*`, loaded before `viewer.js` |
+| `test/` | `node:test` suites for `har.js` (CDP events → HAR) and `viewer/lib.js`; `npm test`, zero dependencies. `test/fixtures/sample.har` is a 13-entry HAR covering the type/status/body matrix (doubles as the viewer's `?har=` example) |
+| `index.html` | repo root → viewer redirect, for the GitHub Pages deployment |
 
-`har.js` and `background.js` are split along a "pure logic vs. browser glue" line: `har.js` runs unchanged in
-Node, so the HAR assembly can be tested without a browser.
+`har.js`/`background.js` and `viewer/lib.js`/`viewer/viewer.js` are split along the same "pure logic vs.
+browser glue" line: the pure halves run unchanged in Node, where `test/` exercises them — run `npm test`
+(Node's built-in `node:test`, no dependencies to install).
 
 ## Install (load unpacked)
 
@@ -37,15 +45,48 @@ Reload after edits with the ⟳ button on its card (no build step).
    page can't read it). With *Reload on start* checked it reloads so the first request ≈ navigation start.
 3. Watch the live counter — entries, **wire** bytes (real `encodedDataLength` on the wire), embedded **bodies**
    (only shown when *Embed response bodies* is on), and a **frames** count if a cross-origin iframe attaches.
-4. Click **Stop** to end the capture; the second button turns into **Download**. Click **Download** to save
-   `<host>.har`. Open it in Chrome DevTools → Network → import, or any HAR viewer.
+4. Click **Stop** to end the capture. The buttons become **Clear · Download · View**: **Download** saves
+   `<host>.har` for Chrome DevTools → Network → import, or any HAR viewer; **View** opens the built-in
+   viewer on the capture directly (no download round-trip). View is always available — with no saved
+   capture it just opens the viewer's drop-a-file page.
 
 If the active tab is a page `chrome.debugger` can't attach to (a `chrome://` settings page, the Web Store, …),
 the button reads **Start in new tab** and captures the URL in a fresh tab instead — as long as *Reload on start*
 is on and a URL is filled in (that new tab needs somewhere to navigate).
 
-A finished capture is saved (`chrome.storage.local`, hence `unlimitedStorage`), so **Download** still works after
-you close and reopen the popup. Starting a new capture or downloading clears it.
+A finished capture is saved (`chrome.storage.local`, hence `unlimitedStorage`), so **View**/**Download** still
+work after you close and reopen the popup. Starting a new capture or downloading clears it.
+
+## Viewer
+
+`viewer/viewer.html` shows a HAR as a **request table** (`#` · Name · Method · Status · Type · Size · Time ·
+Started — every column sortable, Started as an offset from the first request; Type is the URL's file
+extension) with a **detail pane** (Headers · Payload · Preview · Response · Timing tabs; drag the divider to
+resize) and filters on top: URL substring, extension chips built from what's actually in the file (busiest
+first, `(none)` for extension-less requests), status class / "Errors only", and method. `↑`/`↓` walk the
+table, `←`/`→` cycle the detail tabs, `Enter` jumps into the detail pane, `Esc` comes back. **Right-click the header** to choose visible columns and switch the first
+column between **Name / Path / URL** (both persisted); **Export CSV** in the stats bar writes the filtered
+rows in their current order with exactly those columns — machine-friendly values (the first column exports
+whatever mode it shows; sizes in bytes, times in ms).
+
+**Preview** is the rendered view, DevTools-style — prettified JSON, inline images, `<audio>`/`<video>` players
+playing the *captured* bytes (not a re-fetch) — while **Response** is the raw text plus size/MIME meta; a
+**Download** button in the tab bar's corner saves the body. All of that needs the body in the HAR (*Embed
+response bodies* — HAR-standard `content.text`, so foreign HARs with bodies work too).
+
+Opened via the popup's **View** button it auto-loads the last capture from `chrome.storage.local`. It is
+otherwise a plain page — everything is parsed locally, and it runs from `file://` too: open it directly and
+drop any `.har` (from DevTools, Firefox, WebPageTest, …) onto it.
+
+### Hosted viewer (GitHub Pages)
+
+The viewer is plain static files, so GitHub Pages serves it as-is: **Settings → Pages → Deploy from a
+branch → `main` / `/ (root)`**. The site lands on `https://aaronhg.github.io/har-tap/` — the root
+`index.html` redirects into `viewer/viewer.html`.
+
+`?har=<url>` deep-links a HAR: the bundled example is `viewer/viewer.html?har=../test/fixtures/sample.har`
+(also linked from the empty state); same-origin URLs always work, a cross-origin URL needs that server to
+send CORS headers. Hosted or not, parsing stays entirely in the page — no HAR bytes leave the browser.
 
 ## Byte accounting — the warm-cache trap
 
