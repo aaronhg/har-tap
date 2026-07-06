@@ -1,6 +1,9 @@
 # Captured HAR files — they contain cookies, Authorization/Bearer tokens, session
 # IDs, and full request/response bodies. NEVER commit these.
 *.har
+# …except the hand-crafted synthetic fixture (example.com, fake tokens — no real capture):
+# it feeds the tests and the viewer's ?har= example link on GitHub Pages.
+!test/fixtures/sample.har
 
 # macOS
 .DS_Store
