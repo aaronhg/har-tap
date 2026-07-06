@@ -9,6 +9,10 @@ and includes **cross-origin (OOPIF) iframes**, which a naive top-frame tap misse
 It also ships its own **viewer** (`viewer/`): a request table + detail pane with filtering and search — open
 a finished capture straight from the popup (**View**), or drop any `.har` into the page.
 
+**Try the viewer live:** [aaronhg.github.io/har-tap](https://aaronhg.github.io/har-tap/) — drop in a `.har`,
+or jump straight to [the bundled example capture](https://aaronhg.github.io/har-tap/viewer/viewer.html?har=../test/fixtures/sample.har)
+(`viewer.html?har=<url>` deep-links any same-origin/CORS-enabled HAR).
+
 It is a load-unpacked developer tool. The `debugger` permission draws heavy Web Store review, and personal
 use doesn't need a listing, so this isn't packaged for the store.
 
