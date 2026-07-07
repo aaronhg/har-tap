@@ -4,15 +4,16 @@
 // finishes; View (always present) opens the viewer. A finished capture is persisted (by the SW) so
 // View/Download survive closing/reopening the popup.
 //
-// This is the SHARED core. har-tap calls initPopup() with no plugins. A downstream consumer can pass a
-// popup plugin to add UI — extra option inputs and a results panel — through the seams below, without
-// copying this file. With no plugin every seam is inert, so the base popup is unchanged.
+// This is the SHARED core. har-tap calls initPopup() with the bundled throttle plugin (plugins/throttle.js).
+// A downstream consumer can pass more popup plugins to add UI — extra option inputs and a results panel —
+// through the seams below, without copying this file. With no plugin every seam is inert.
 //
 // Popup plugin surface (all optional):
 //   optionsHtml : string          — markup injected into #opt-slot (after the base checkboxes)
 //   optionIds   : string[]        — element ids to persist/restore alongside the base options
 //   startOpts($) : object         — extra fields merged into the { type:'start' } opts ($ = id → element)
-//   renderStatus(st) : string     — extra HTML appended to the live "Capturing…" line
+//   renderStatus(st) : string     — extra HTML appended inline to BOTH the live "Capturing…" line and
+//                                   the "Stopped" summary (st = live status or stop meta, same fields)
 //   renderReady(meta) : string    — HTML for #panel-slot shown in the ready state (and restored on reopen)
 //   reset()                       — clear any transient panel state (idle / clear / after download)
 
@@ -31,7 +32,14 @@ export function initPopup(config = {}) {
   const fmtBytes = (n) => n > 1e6 ? (n / 1e6).toFixed(1) + ' MB' : n > 1e3 ? (n / 1e3).toFixed(1) + ' kB' : n + ' B';
   // An option element persists its `.checked` (checkbox) or its `.value` (text/textarea).
   const getOpt = (el) => el && el.type === 'checkbox' ? el.checked : (el ? el.value : undefined);
-  const setOpt = (el, v) => { if (!el) return; if (el.type === 'checkbox') el.checked = !!v; else el.value = v ?? ''; };
+  const setOpt = (el, v) => {
+    if (!el) return;
+    if (el.type === 'checkbox') { el.checked = !!v; return; }
+    el.value = v ?? '';
+    // A persisted value that no longer matches any <option> (renamed preset, swapped plugin set)
+    // would leave a <select> blank (selectedIndex -1) — fall back to its first option instead.
+    if (el.selectedIndex === -1 && el.options?.length) el.selectedIndex = 0;
+  };
 
   let tab = null, capTabId = null, pollTimer = null, uiState = 'idle'; // idle | capturing | ready
 
@@ -41,7 +49,8 @@ export function initPopup(config = {}) {
   // The status box doubles as the error line: normal status vs. a red error, same block.
   const setStat = (html) => { const s = $('stat'); s.classList.remove('is-err'); s.innerHTML = html; };
   const setErr = (text) => { const s = $('stat'); s.classList.add('is-err'); s.textContent = text; };
-  const readyStat = (m) => `Stopped · <b>${m.count}</b> entries · wire <b>${fmtBytes(m.wireBytes)}</b>${m.includeBodies ? ` · bodies <b>${fmtBytes(m.bodyBytes)}</b>` : ''} · ${((m.sinceMs || 0) / 1000).toFixed(2)}s`;
+  const pluginStat = (m) => plugins.map((p) => (p.renderStatus ? p.renderStatus(m) || '' : '')).join('');
+  const readyStat = (m) => `Stopped · <b>${m.count}</b> entries · wire <b>${fmtBytes(m.wireBytes)}</b>${m.includeBodies ? ` · bodies <b>${fmtBytes(m.bodyBytes)}</b>` : ''} · ${((m.sinceMs || 0) / 1000).toFixed(2)}s${pluginStat(m)}`;
 
   // Plugins own #panel-slot: rendered from meta in the ready state, cleared otherwise.
   const setPanel = (meta) => { const el = $('panel-slot'); if (!el) return; el.innerHTML = plugins.map((p) => (p.renderReady && meta ? p.renderReady(meta) : '')).join(''); };
@@ -119,8 +128,7 @@ export function initPopup(config = {}) {
     if (!st || !st.capturing) { setStat('Idle'); return; }
     const frames = st.frames > 1 ? ` · <b>${st.frames}</b> frames` : '';
     const bodies = st.includeBodies ? ` · bodies <b>${fmtBytes(st.bodyBytes)}</b>` : ''; // only when embedding is on
-    const extra = plugins.map((p) => (p.renderStatus ? p.renderStatus(st) || '' : '')).join('');
-    setStat(`Capturing… <b>${st.count}</b> entries${frames} · wire <b>${fmtBytes(st.wireBytes)}</b>${bodies} · ${(st.sinceMs / 1000).toFixed(0)}s${extra}`);
+    setStat(`Capturing… <b>${st.count}</b> entries${frames} · wire <b>${fmtBytes(st.wireBytes)}</b>${bodies} · ${(st.sinceMs / 1000).toFixed(0)}s${pluginStat(st)}`);
   }
   function startPolling() {
     stopPolling();
@@ -142,7 +150,9 @@ export function initPopup(config = {}) {
     if (!r.ok) { setErr(r.error); return; }
     chrome.storage.local.remove([HAR_KEY, HAR_META_KEY]); // a new capture supersedes any saved one
     capTabId = r.tabId || capTabId;      // may be a fresh tab if the active page couldn't be attached
-    enterCapturing({ capturing: true, count: 0, wireBytes: 0, bodyBytes: 0, includeBodies: $('bodies').checked, sinceMs: 0 });
+    // Seed from a REAL status poll, not a synthetic object: statusOf() runs the plugins' status()
+    // contributions, so plugin fields (e.g. the throttle label) are present from the first paint.
+    enterCapturing(await msg({ type: 'status', tabId: capTabId }));
   }
 
   async function stop() {

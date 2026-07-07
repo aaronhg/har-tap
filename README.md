@@ -47,6 +47,11 @@ If the active tab is a page `chrome.debugger` can't attach to (a `chrome://` set
 the button reads **Start in new tab** and captures the URL in a fresh tab instead — as long as *Reload on start*
 is on and a URL is filled in (that new tab needs somewhere to navigate).
 
+**Throttling**: the popup's Throttling select ships Chrome DevTools' own presets — **Fast 4G · Slow 4G ·
+3G · Offline**, the exact `Network.emulateNetworkConditions` values DevTools sends (bytes/s and ms,
+including its adjustment factors) — applied to the whole session, OOPIF frames included. The chosen preset
+is stamped into the HAR as `log._throttling`, so the file records the conditions it was captured under.
+
 A finished capture is saved (`chrome.storage.local`, hence `unlimitedStorage`), so **View**/**Download** still
 work after you close and reopen the popup. Starting a new capture or downloading clears it.
 
@@ -92,19 +97,21 @@ send CORS headers. Hosted or not, parsing stays entirely in the page — no HAR 
 | `core/har.js` | **pure** HAR-entry builder (no `chrome.*`, no Node) — unit-testable in isolation |
 | `core/capture-core.js` | the reusable capture engine: owns the `chrome.debugger` session, wires CDP events → `HarTap`, handles OOPIF auto-attach. Exposes plugin hook seams (see the file header) so a superset consumer can layer on features without forking it |
 | `core/popup-core.js` | the reusable popup engine: Start · Stop → Clear·Download·View, URL + option persistence, live counter, Blob download of `<host>.har`, with option-input / results-panel seams |
-| `background.js` / `popup.js` | thin entry points — wire the `core/` engines with **no plugins**, i.e. the plain tool |
+| `background.js` / `popup.js` | thin entry points — wire the `core/` engines with the bundled plugins below |
+| `plugins/throttle.js` | DevTools-parity network throttling (Fast 4G · Slow 4G · 3G · Offline, Chrome's exact CDP values), written against the `core/` plugin seams — doubles as the reference plugin |
 | `popup.html` | the popup markup (includes empty `#opt-slot` / `#panel-slot` a plugin fills) |
 | `index.html` + `viewer/viewer.js` / `.css` | the viewer page (the repo root IS the app — it doubles as the GitHub Pages site, no redirect): request table + resizable detail pane (Headers · Payload · Preview · Response · Timing), file-extension/status/method/text filters, sortable columns, stats footer. A **pure** web page — the only `chrome.*` touch is feature-detected storage read, so it also works from `file://` with drag-and-drop (classic scripts, no ES modules: Chrome blocks module imports on `file://`) |
 | `viewer/lib.js` | the viewer's **pure** helpers (formatting, URL/extension parsing, body classification, CSV) — no DOM, no `chrome.*`, loaded before `viewer.js` |
-| `test/` | `node:test` suites for `core/har.js` (CDP events → HAR) and `viewer/lib.js`; `npm test`, zero dependencies. `test/fixtures/sample.har` is a 13-entry HAR covering the type/status/body matrix (doubles as the viewer's `?har=` example) |
+| `test/` | `node:test` suites for `core/har.js` (CDP events → HAR), `viewer/lib.js` and `plugins/throttle.js`; `npm test`, zero dependencies. `test/fixtures/sample.har` is a 13-entry HAR covering the type/status/body matrix (doubles as the viewer's `?har=` example) |
 | `icons/` · `docs/` | extension + favicon PNGs (script-generated, no binary sources) · the README screenshot |
 | `.github/workflows/test.yml` | CI: `npm test` on every push/PR |
 
 `core/har.js`/`core/capture-core.js` and `viewer/lib.js`/`viewer/viewer.js` are split along the same "pure
 logic vs. browser glue" line: the pure halves run unchanged in Node, where `test/` exercises them — run
-`npm test` (Node's built-in `node:test`, no dependencies to install). The `core/` engines take plugin hooks
-but run with none here, so a superset build (e.g. via a git submodule of this repo) reuses `core/` verbatim
-and adds its layer through the seams rather than copying these files.
+`npm test` (Node's built-in `node:test`, no dependencies to install). The `core/` engines take plugin hooks —
+har-tap itself wires exactly one, the throttle plugin, which doubles as the reference implementation — so a
+superset build (e.g. via a git submodule of this repo) reuses `core/` verbatim and adds its layer through
+the same seams rather than copying these files.
 
 ## Byte accounting — the warm-cache trap
 

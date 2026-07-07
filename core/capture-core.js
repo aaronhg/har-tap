@@ -3,9 +3,9 @@
 // the assembled HAR back to the popup. chrome.debugger IS the CDP channel DevTools speaks, so
 // Network.enable + responseReceived/loadingFinished + getResponseBody map 1:1 onto the DevTools Network panel.
 //
-// This is the SHARED core. har-tap wires it with no plugins (background.js: createCapture()). A downstream
-// consumer can pass plugins that add extra behaviour through the hook seams below, WITHOUT copying this
-// file. With plugins:[] every seam is a no-op, so the base behaviour is byte-identical to the standalone tool.
+// This is the SHARED core. har-tap wires it with the bundled throttle plugin (plugins/throttle.js — also
+// the reference plugin). A downstream consumer can pass plugins that add extra behaviour through the hook
+// seams below, WITHOUT copying this file. With plugins:[] every seam is a no-op.
 //
 // Plugin hook surface (all optional, all wrapped so a throwing plugin can't break a capture):
 //   initSession(sess, opts) → truthy string aborts the start with that error (e.g. a rejected option)
@@ -181,7 +181,9 @@ export function createCapture(config = {}) {
         if (navUrl) {
           // Navigate to the user-supplied URL (may differ from the current tab) instead of reloading in place.
           const res = await send({ tabId }, 'Page.navigate', { url: navUrl }); // first request ≈ nav start
-          if (res && res.errorText) throw new Error('navigate failed: ' + res.errorText);
+          // opts.tolerateNavError (set by a plugin's startOpts): the nav is EXPECTED to fail and the failed
+          // load is the data — e.g. offline throttling — so don't turn it into a fatal start error.
+          if (res && res.errorText && !opts.tolerateNavError) throw new Error('navigate failed: ' + res.errorText);
         } else {
           await send({ tabId }, 'Page.reload', { ignoreCache: true }); // first request ≈ nav start
         }
