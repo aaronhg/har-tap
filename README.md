@@ -89,18 +89,22 @@ send CORS headers. Hosted or not, parsing stays entirely in the page — no HAR 
 | file | role |
 |---|---|
 | `manifest.json` | MV3, `debugger` + `tabs` + `storage` + `unlimitedStorage` permissions, module service worker |
-| `har.js` | **pure** HAR-entry builder (no `chrome.*`, no Node) — unit-testable in isolation |
-| `background.js` | service worker: owns the `chrome.debugger` session, wires CDP events → `HarTap`, handles OOPIF auto-attach |
-| `popup.html` / `popup.js` | small UI (Start · Stop → Clear·Download·View; URL + checkbox choices persisted; finished HAR saved so it survives reopen) + live counter + Blob download of `<host>.har` |
+| `core/har.js` | **pure** HAR-entry builder (no `chrome.*`, no Node) — unit-testable in isolation |
+| `core/capture-core.js` | the reusable capture engine: owns the `chrome.debugger` session, wires CDP events → `HarTap`, handles OOPIF auto-attach. Exposes plugin hook seams (see the file header) so a superset consumer can layer on features without forking it |
+| `core/popup-core.js` | the reusable popup engine: Start · Stop → Clear·Download·View, URL + option persistence, live counter, Blob download of `<host>.har`, with option-input / results-panel seams |
+| `background.js` / `popup.js` | thin entry points — wire the `core/` engines with **no plugins**, i.e. the plain tool |
+| `popup.html` | the popup markup (includes empty `#opt-slot` / `#panel-slot` a plugin fills) |
 | `index.html` + `viewer/viewer.js` / `.css` | the viewer page (the repo root IS the app — it doubles as the GitHub Pages site, no redirect): request table + resizable detail pane (Headers · Payload · Preview · Response · Timing), file-extension/status/method/text filters, sortable columns, stats footer. A **pure** web page — the only `chrome.*` touch is feature-detected storage read, so it also works from `file://` with drag-and-drop (classic scripts, no ES modules: Chrome blocks module imports on `file://`) |
 | `viewer/lib.js` | the viewer's **pure** helpers (formatting, URL/extension parsing, body classification, CSV) — no DOM, no `chrome.*`, loaded before `viewer.js` |
-| `test/` | `node:test` suites for `har.js` (CDP events → HAR) and `viewer/lib.js`; `npm test`, zero dependencies. `test/fixtures/sample.har` is a 13-entry HAR covering the type/status/body matrix (doubles as the viewer's `?har=` example) |
+| `test/` | `node:test` suites for `core/har.js` (CDP events → HAR) and `viewer/lib.js`; `npm test`, zero dependencies. `test/fixtures/sample.har` is a 13-entry HAR covering the type/status/body matrix (doubles as the viewer's `?har=` example) |
 | `icons/` · `docs/` | extension + favicon PNGs (script-generated, no binary sources) · the README screenshot |
 | `.github/workflows/test.yml` | CI: `npm test` on every push/PR |
 
-`har.js`/`background.js` and `viewer/lib.js`/`viewer/viewer.js` are split along the same "pure logic vs.
-browser glue" line: the pure halves run unchanged in Node, where `test/` exercises them — run `npm test`
-(Node's built-in `node:test`, no dependencies to install).
+`core/har.js`/`core/capture-core.js` and `viewer/lib.js`/`viewer/viewer.js` are split along the same "pure
+logic vs. browser glue" line: the pure halves run unchanged in Node, where `test/` exercises them — run
+`npm test` (Node's built-in `node:test`, no dependencies to install). The `core/` engines take plugin hooks
+but run with none here, so a superset build (e.g. via a git submodule of this repo) reuses `core/` verbatim
+and adds its layer through the seams rather than copying these files.
 
 ## Byte accounting — the warm-cache trap
 
@@ -118,7 +122,7 @@ Sizing a capture from `encodedDataLength` alone is unreliable: on a warm cache, 
 ## Cross-origin iframes (OOPIF)
 
 A page embedded in a **cross-origin `<iframe>`** becomes an out-of-process iframe: a separate renderer and a
-separate CDP target the top-tab Network tap can't see. `background.js` arms
+separate CDP target the top-tab Network tap can't see. `core/capture-core.js` arms
 `Target.setAutoAttach {autoAttach, waitForDebuggerOnStart, flatten:true}` on the root before reload. Each child
 frame then auto-attaches: it gets its own `Network.enable` + `setCacheDisabled`, re-arms `setAutoAttach` on
 itself (auto-attach is **not** recursive — every session must arm its own children), and

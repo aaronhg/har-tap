@@ -3,7 +3,7 @@
 // Run: npm test (node --test, no dependencies).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { HarTap, byteLen, b64Size } from '../har.js';
+import { HarTap, byteLen, b64Size } from '../core/har.js';
 
 const approx = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-6, `${msg ?? 'approx'}: ${a} != ${b}`);
 

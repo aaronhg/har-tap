@@ -1,7 +1,12 @@
 // har.js — a PURE HAR-entry builder. No chrome.* and no Node builtins, so it runs unchanged in a
-// service worker AND is unit-testable in Node. background.js feeds it raw CDP events (chrome.debugger's
+// service worker AND is unit-testable in Node. capture-core.js feeds it raw CDP events (chrome.debugger's
 // onEvent params are the same shapes the DevTools Network domain emits), and this assembles a standard
 // HAR 1.2 log (entries + pages/pageTimings) that Chrome DevTools and any HAR viewer can import.
+//
+// This is the SHARED core: har-tap uses it directly; a downstream consumer (via a git submodule) reuses
+// it unchanged. Entry-level extras are namespaced with a leading underscore
+// (_transferSize/_initiator/_priority/_resourceType/_session) — non-standard but ignored by HAR readers,
+// so adding one never changes how a viewer renders the log.
 
 const hdrArr = (h) => Object.entries(h || {}).map(([name, value]) => ({ name, value: String(value) }));
 const qsArr = (u) => { try { const out = []; for (const [name, value] of new URL(u).searchParams) out.push({ name, value }); return out; } catch { return []; } };
@@ -29,16 +34,16 @@ export class HarTap {
   requestWillBeSent(p, sid = '') {
     if (this.navMono == null && !sid) { this.navMono = p.timestamp; this.navWall = p.wallTime; this.pageUrl = p.documentURL || (p.request && p.request.url) || ''; } // first ROOT request ≈ navigation start
     const k = this._key(sid, p.requestId);
-    if (p.redirectResponse) { const ri = this.reqInfo.get(k); if (ri) this._push(ri, p.redirectResponse, p.timestamp, 0); } // emit the redirect hop
+    if (p.redirectResponse) { const ri = this.reqInfo.get(k); if (ri) this._push(ri, p.redirectResponse, p.timestamp, 0, undefined, sid); } // emit the redirect hop
     this.reqInfo.set(k, { request: p.request, wallTime: p.wallTime, type: p.type, initiator: p.initiator, priority: p.request && p.request.initialPriority });
   }
   responseReceived(p, sid = '') { const ri = this.reqInfo.get(this._key(sid, p.requestId)); if (ri) ri.response = p.response; }
-  loadingFinished(p, sid = '') { const k = this._key(sid, p.requestId); const ri = this.reqInfo.get(k); let e = null; if (ri && ri.response) e = this._push(ri, ri.response, p.timestamp, p.encodedDataLength); this.reqInfo.delete(k); return e; }
-  loadingFailed(p, sid = '') { const k = this._key(sid, p.requestId); const ri = this.reqInfo.get(k); if (ri && ri.response) this._push(ri, ri.response, p.timestamp, 0, p.errorText); this.reqInfo.delete(k); }
+  loadingFinished(p, sid = '') { const k = this._key(sid, p.requestId); const ri = this.reqInfo.get(k); let e = null; if (ri && ri.response) e = this._push(ri, ri.response, p.timestamp, p.encodedDataLength, undefined, sid); this.reqInfo.delete(k); return e; }
+  loadingFailed(p, sid = '') { const k = this._key(sid, p.requestId); const ri = this.reqInfo.get(k); if (ri && ri.response) this._push(ri, ri.response, p.timestamp, 0, p.errorText, sid); this.reqInfo.delete(k); }
   domContentEventFired(p) { this.domTs = p.timestamp; }
   loadEventFired(p) { this.loadTs = p.timestamp; }
 
-  _push(ri, resp, finishTs, encoded, errorText) {
+  _push(ri, resp, finishTs, encoded, errorText, sid = '') {
     const t = resp.timing; const reqTs = t ? t.requestTime : null;
     const span = (a, b) => (t && t[a] >= 0 && t[b] >= 0 ? t[b] - t[a] : -1);
     const send = t ? Math.max(0, t.sendEnd - t.sendStart) : -1;
@@ -71,6 +76,7 @@ export class HarTap {
     if (resp.remoteIPAddress) e.serverIPAddress = resp.remoteIPAddress;
     if (ri.initiator) e._initiator = ri.initiator;                 // parser/script/preload + stack
     if (ri.priority) e._priority = ri.priority;                    // VeryHigh/High/Medium/Low/VeryLow
+    if (sid) e._session = sid;                                     // OOPIF child session id (absent on top-frame entries) — lets a consumer scope to one frame
     if (errorText) { e.response._error = errorText; e._error = errorText; }
     this.entries.push(e);
     return e;
@@ -86,6 +92,9 @@ export class HarTap {
     entry.response.content.size = size;
     return size;
   }
+
+  // Refine an entry's content.size to a known DECODED length without embedding the body (measure-only).
+  setDecodedSize(entry, size) { if (entry && size >= 0) entry.response.content.size = size; return size; }
 
   // Assemble the final HAR — entries sorted by startedDateTime (request/initiation order, the DevTools
   // convention) with log.pages[].pageTimings.

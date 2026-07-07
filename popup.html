@@ -55,6 +55,9 @@
   <label><input type="checkbox" id="nocache" checked> Disable cache (real wire byte sizes)</label>
   <label><input type="checkbox" id="bodies"> Embed response bodies (base64 in HAR)</label>
 
+  <!-- A popup plugin (superset consumer) injects extra option inputs here; empty in plain har-tap. -->
+  <div id="opt-slot"></div>
+
   <div class="row">
     <button id="start" class="primary">Start</button>
     <button id="action" class="primary" disabled>Stop</button>
@@ -62,6 +65,8 @@
   </div>
 
   <div class="stat" id="stat">Idle</div>
+  <!-- A popup plugin renders a results panel here; empty in plain har-tap. -->
+  <div id="panel-slot"></div>
   <div class="hint">Attaching shows Chrome's "debugging this browser" bar — expected. One debugger per tab: close DevTools on the target tab first.</div>
 
   <script type="module" src="popup.js"></script>
