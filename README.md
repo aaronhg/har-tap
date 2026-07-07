@@ -52,6 +52,10 @@ is on and a URL is filled in (that new tab needs somewhere to navigate).
 including its adjustment factors) — applied to the whole session, OOPIF frames included. The chosen preset
 is stamped into the HAR as `log._throttling`, so the file records the conditions it was captured under.
 
+**Several navigations in one capture**: each top-frame navigation becomes its own HAR page (`page_1`,
+`page_2`, …) with per-page DOMContentLoaded/Load timings, and every entry's `pageref` points at the
+navigation it started under — the DevTools convention. The viewer shows a page filter for such files.
+
 A finished capture is saved (`chrome.storage.local`, hence `unlimitedStorage`), so **View**/**Download** still
 work after you close and reopen the popup. Starting a new capture or downloading clears it.
 
@@ -63,7 +67,8 @@ The viewer (`index.html`) is a request table with a detail pane:
   the offset from the first request; Type is the URL's file extension. **Right-click the header** to choose
   visible columns and to switch the first column between **Name / Path / URL** (both persisted).
 - **Filters** — URL substring, file-extension chips built from what's actually in the file (busiest first,
-  `(none)` for extension-less requests), status class / "Errors only", and method.
+  `(none)` for extension-less requests), status class / "Errors only", method, and — when the HAR spans
+  several navigations — a page selector.
 - **Detail pane** — Headers · Payload · Preview · Response · Timing tabs; drag the divider to resize.
 - **Keyboard** — `↑`/`↓` walk the table, `←`/`→` cycle the detail tabs, `Enter` jumps into the pane,
   `Esc` comes back.
@@ -125,6 +130,13 @@ Sizing a capture from `encodedDataLength` alone is unreliable: on a warm cache, 
   `content.text`(+`encoding:base64`) and sets `content.size` to the **decoded** length. Note binary bodies
   come back as base64, so no text re-encoding corruption. Cache-disable alone gives wire-byte sizes; embedding
   bodies is what yields decoded sizes for gzipped text.
+
+Sizes are split, not guessed: `Network.dataReceived` sums give the body-only wire bytes, so
+`response.bodySize` is the body, `headersSize` the rest of the transfer, and `content.compression` (bytes
+saved by content-encoding) is recorded whenever that exact split is available. The capture also listens to
+`Network.*ExtraInfo`: request entries carry the real wire headers (including `Cookie`/`User-Agent`, which
+the plain events omit) and responses keep **every** `Set-Cookie` (CDP's merged header view drops repeats);
+`log.browser` records the capturing Chrome version.
 
 ## Cross-origin iframes (OOPIF)
 

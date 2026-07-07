@@ -32,6 +32,8 @@ export function createCapture(config = {}) {
   const HAR_META_KEY = config.metaKey || 'harTapHarMeta';  // its summary {count, wireBytes, bodyBytes, includeBodies}
 
   const sessions = new Map(); // tabId → { tap, includeBodies, disableCache, bodyCap, bodyBudget, bodyBytes, children, started, _tick }
+  // log.browser for the HAR — the SW's UA names the Chrome doing the capturing.
+  const BROWSER = (() => { try { const m = (navigator.userAgent || '').match(/Chrome\/([\d.]+)/); return m ? { name: 'Chrome', version: m[1] } : null; } catch { return null; } })();
   const tickMs = Math.min(Infinity, ...plugins.map((p) => (p.tickMs > 0 ? p.tickMs : Infinity)));
 
   // Run a plugin hook across all plugins, isolating failures. Sync form for observers; hooks that must
@@ -71,7 +73,10 @@ export function createCapture(config = {}) {
     runHook('onEvent', { method, params, sid, target, sess, send });
     switch (method) {
       case 'Network.requestWillBeSent': tap.requestWillBeSent(params, sid); break;
+      case 'Network.requestWillBeSentExtraInfo': tap.requestWillBeSentExtraInfo(params, sid); break;   // real wire request headers (Cookie/UA)
       case 'Network.responseReceived': tap.responseReceived(params, sid); break;
+      case 'Network.responseReceivedExtraInfo': tap.responseReceivedExtraInfo(params, sid); break;     // full Set-Cookie list + raw header text
+      case 'Network.dataReceived': tap.dataReceived(params, sid); break;                               // body-only wire bytes → bodySize/headersSize split
       case 'Network.loadingFinished': {
         const entry = tap.loadingFinished(params, sid);
         if (entry && sess.includeBodies) recoverBody(target, params.requestId, entry, sess);
@@ -144,7 +149,7 @@ export function createCapture(config = {}) {
     }
     if (sessions.has(tabId)) return { ok: false, error: 'already capturing this tab' };
     const sess = {
-      tap: new HarTap(),
+      tap: Object.assign(new HarTap(), { browser: BROWSER }),
       includeBodies: !!opts.includeBodies,
       disableCache: opts.disableCache !== false,
       bodyCap: opts.bodyCap ?? 1024 * 1024,       // skip any single body over this (bytes)
@@ -170,6 +175,10 @@ export function createCapture(config = {}) {
       // source.sessionId. Armed BEFORE reload so a child frame is caught the moment it goes cross-origin.
       await send({ tabId }, 'Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: true }).catch(() => {});
       await send({ tabId }, 'Page.enable').catch(() => {});
+      // Tell the tap which frame is the TOP one: only its Document requests open a new HAR page
+      // (same-origin iframes ride the root session too and must not split the log).
+      try { sess.tap.mainFrameId = (await send({ tabId }, 'Page.getFrameTree'))?.frameTree?.frame?.id || null; }
+      catch { /* stays null → single-page log, as before */ }
       await runHookAsync('onRootAttach', { send, tabId, sess });   // inject page scripts before the navigate, so they run on the new document
       sessions.set(tabId, sess);
       runHook('onStart', { tabId, sess });

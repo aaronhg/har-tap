@@ -45,10 +45,16 @@ function ingest(har) {
       decoded: (e.response.content && e.response.content.size) || 0,
       time: e.time >= 0 ? e.time : null,
       start: starts[i] - t0, started: new Date(starts[i]),           // start is NaN for a bad date — renderers show '–'
+      page: e.pageref || '',
     };
   });
   const methods = [...new Set(rows.map((r) => r.method))].sort();
   $('method').replaceChildren(new Option('All methods', 'all'), ...methods.map((m) => new Option(m, m)));
+  // page filter: one page per top-frame navigation — only worth showing when the capture spans several
+  const pages = (har.log.pages || []).filter((pg) => pg && pg.id);
+  $('page').hidden = pages.length < 2;
+  $('page').replaceChildren(new Option('All pages', 'all'),
+    ...pages.map((pg, i) => new Option(`${i + 1} · ${String(pg.title || pg.id).replace(/^https?:\/\//, '').slice(0, 32)}`, pg.id)));
   activeTypes.clear();   // a fresh file brings fresh extensions — stale picks would filter on ghosts
   buildChips();
 }
@@ -148,6 +154,8 @@ function passes(r) {
   else if (st !== 'all' && Math.floor(r.status / 100) !== +st) return false;
   const m = $('method').value;
   if (m !== 'all' && r.method !== m) return false;
+  const pg = $('page').value;
+  if (pg && pg !== 'all' && r.page !== pg) return false;
   return true;
 }
 
@@ -517,7 +525,8 @@ function wireUi() {
   $('q').oninput = applyFilters;
   $('status').onchange = applyFilters;
   $('method').onchange = applyFilters;
-  $('reset').onclick = () => { $('q').value = ''; $('status').value = 'all'; $('method').value = 'all'; activeTypes.clear(); syncChips(); applyFilters(); };
+  $('page').onchange = applyFilters;
+  $('reset').onclick = () => { $('q').value = ''; $('status').value = 'all'; $('method').value = 'all'; $('page').value = 'all'; activeTypes.clear(); syncChips(); applyFilters(); };
 
   for (const id of ['open', 'open2']) $(id).onclick = () => $('file').click();
   $('file').onchange = () => { if ($('file').files[0]) readFile($('file').files[0]); $('file').value = ''; };

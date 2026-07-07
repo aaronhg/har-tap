@@ -18,8 +18,9 @@ const fullTiming = () => ({ requestTime: M0 + 0.1, dnsStart: 5, dnsEnd: 15, conn
 function run(tap, o = {}) {
   const { id = '1', sid = '', url = 'https://example.com/', method = 'GET', reqHeaders = {},
     respHeaders = {}, status = 200, mime = 'text/html', timing = fullTiming(),
-    wallTime = T0 + 0.1, ts = M0 + 0.1, finishTs = M0 + 0.35, encoded = 1234, type = 'Document', post } = o;
-  tap.requestWillBeSent({ requestId: id, timestamp: ts, wallTime, documentURL: url,
+    wallTime = T0 + 0.1, ts = M0 + 0.1, finishTs = M0 + 0.35, encoded = 1234, type = 'Document', post,
+    frameId } = o;
+  tap.requestWillBeSent({ requestId: id, timestamp: ts, wallTime, documentURL: url, frameId,
     request: { url, method, headers: reqHeaders, initialPriority: 'High', ...(post ? { postData: post } : {}) },
     type, initiator: { type: 'other' } }, sid);
   tap.responseReceived({ requestId: id, response: { status, statusText: 'OK', headers: respHeaders,
@@ -86,7 +87,72 @@ test('response cookies: multi-line set-cookie with attributes', () => {
   assert.equal(c1.sameSite, 'Lax');
   assert.equal(c2.name, 'other');
   assert.equal(c2.domain, '.example.com');
-  assert.ok(c2.expires.startsWith('Wed'));
+  assert.equal(c2.expires, '2031-01-01T00:00:00.000Z');   // spec-style ISO, not the raw RFC string
+});
+
+test('ExtraInfo: wire headers win — Cookie/UA on the request, every Set-Cookie on the response', () => {
+  const tap = new HarTap();
+  // request ExtraInfo arrives BEFORE requestWillBeSent (CDP order is not guaranteed) → stashed
+  tap.requestWillBeSentExtraInfo({ requestId: '1', headers: { cookie: 'sid=abc', 'user-agent': 'UA/1' } });
+  tap.requestWillBeSent({ requestId: '1', timestamp: M0 + 0.1, wallTime: T0 + 0.1,
+    documentURL: 'https://example.com/',
+    request: { url: 'https://example.com/', method: 'GET', headers: { Accept: 'text/html' } }, type: 'Document' });
+  tap.responseReceived({ requestId: '1', response: { status: 200, statusText: 'OK',
+    headers: { 'content-type': 'text/html', 'set-cookie': 'a=1; Path=/' },   // CDP-merged view: one cookie lost
+    mimeType: 'text/html', protocol: 'h2', timing: fullTiming() } });
+  tap.responseReceivedExtraInfo({ requestId: '1',
+    headers: { 'content-type': 'text/html', 'set-cookie': 'a=1; Path=/\nb=2; Secure' } });
+  const e = tap.loadingFinished({ requestId: '1', timestamp: M0 + 0.3, encodedDataLength: 1000 });
+  assert.deepEqual(e.request.cookies, [{ name: 'sid', value: 'abc' }]);
+  assert.ok(e.request.headers.some((h) => h.name === 'user-agent' && h.value === 'UA/1'));
+  const setCookies = e.response.headers.filter((h) => h.name === 'set-cookie');
+  assert.equal(setCookies.length, 2);                     // split back into one header entry per cookie
+  assert.equal(e.response.cookies.length, 2);
+  assert.equal(e.response.cookies[1].secure, true);
+});
+
+test('dataReceived splits wire bytes: bodySize is body-only, headersSize the rest, compression recorded', () => {
+  const tap = new HarTap();
+  tap.requestWillBeSent({ requestId: '1', timestamp: M0 + 0.1, wallTime: T0 + 0.1,
+    documentURL: 'https://example.com/a.js',
+    request: { url: 'https://example.com/a.js', method: 'GET', headers: {} }, type: 'Script' });
+  tap.responseReceived({ requestId: '1', response: { status: 200, statusText: 'OK', headers: {},
+    mimeType: 'application/javascript', protocol: 'h2', timing: fullTiming() } });
+  tap.dataReceived({ requestId: '1', encodedDataLength: 400 });
+  tap.dataReceived({ requestId: '1', encodedDataLength: 434 });
+  const e = tap.loadingFinished({ requestId: '1', timestamp: M0 + 0.3, encodedDataLength: 1234 });
+  assert.equal(e.response.bodySize, 834);                 // Σ dataReceived
+  assert.equal(e.response.headersSize, 400);              // total − body
+  assert.equal(e.response._transferSize, 1234);
+  tap.setDecodedSize(e, 2000);                            // gzip: decoded > wire body
+  assert.equal(e.response.content.compression, 1166);     // 2000 − 834
+});
+
+test('headersSize falls back to raw header text; no compression without the exact body split', () => {
+  const tap = new HarTap();
+  const headersText = 'HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n\r\n';
+  tap.requestWillBeSent({ requestId: '1', timestamp: M0 + 0.1, wallTime: T0 + 0.1,
+    documentURL: 'https://example.com/x',
+    request: { url: 'https://example.com/x', method: 'GET', headers: {} }, type: 'XHR' });
+  tap.responseReceived({ requestId: '1', response: { status: 200, statusText: 'OK', headers: {},
+    mimeType: 'text/plain', protocol: 'http/1.1', timing: fullTiming(),
+    headersText, requestHeadersText: 'GET /x HTTP/1.1\r\nHost: example.com\r\n\r\n' } });
+  const e = tap.loadingFinished({ requestId: '1', timestamp: M0 + 0.3, encodedDataLength: 500 });
+  assert.equal(e.response.headersSize, headersText.length);
+  assert.equal(e.request.headersSize, 38);
+  assert.equal(e.response.bodySize, 500);                 // no dataReceived → old whole-message fallback
+  tap.setDecodedSize(e, 600);
+  assert.equal(e.response.content.compression, undefined); // fallback bodySize would fake the number
+});
+
+test('postData.params: urlencoded bodies are parsed alongside text; log.browser is emitted', () => {
+  const tap = new HarTap();
+  tap.browser = { name: 'Chrome', version: '138.0.7204.49' };
+  const e = run(tap, { url: 'https://example.com/api', method: 'POST',
+    reqHeaders: { 'Content-Type': 'application/x-www-form-urlencoded' }, post: 'k=v&k2=v%202' });
+  assert.equal(e.request.postData.text, 'k=v&k2=v%202');
+  assert.deepEqual(e.request.postData.params, [{ name: 'k', value: 'v' }, { name: 'k2', value: 'v 2' }]);
+  assert.deepEqual(tap.build().log.browser, { name: 'Chrome', version: '138.0.7204.49' });
 });
 
 test('redirect: redirectResponse emits the hop as its own entry', () => {
@@ -179,6 +245,71 @@ test('build: entries sorted by start time, pageTimings relative to nav start', (
   approx(page.pageTimings.onLoad, 700);
   assert.equal(har.log.version, '1.2');
   assert.equal(har.log.creator.name, 'har-tap');
+});
+
+test('multi-page: each top-frame navigation opens a page with its own timings', () => {
+  const tap = new HarTap();
+  tap.mainFrameId = 'F0';
+  run(tap, { id: '1', url: 'https://example.com/', frameId: 'F0' });
+  run(tap, { id: '2', url: 'https://example.com/app.js', type: 'Script', frameId: 'F0',
+    wallTime: T0 + 0.3, ts: M0 + 0.3, timing: { ...fullTiming(), requestTime: M0 + 0.3 }, finishTs: M0 + 0.4 });
+  tap.domContentEventFired({ timestamp: M0 + 0.5 });
+  tap.loadEventFired({ timestamp: M0 + 0.8 });
+  run(tap, { id: '3', url: 'https://example.com/checkout', frameId: 'F0',
+    wallTime: T0 + 5, ts: M0 + 5, timing: { ...fullTiming(), requestTime: M0 + 5 }, finishTs: M0 + 5.2 });
+  tap.domContentEventFired({ timestamp: M0 + 5.4 });
+  tap.loadEventFired({ timestamp: M0 + 5.9 });
+  const har = tap.build();
+  assert.equal(har.log.pages.length, 2);
+  const [p1, p2] = har.log.pages;
+  assert.equal(p1.id, 'page_1');
+  assert.equal(p2.id, 'page_2');
+  assert.equal(p2.title, 'https://example.com/checkout');
+  approx(p1.pageTimings.onContentLoad, 400);
+  approx(p1.pageTimings.onLoad, 700);        // page_1 keeps ITS events — nav 2's must not clobber them
+  approx(p2.pageTimings.onContentLoad, 400); // …and page_2 is timed against its OWN nav start
+  approx(p2.pageTimings.onLoad, 900);
+  assert.deepEqual(har.log.entries.map((e) => e.pageref), ['page_1', 'page_1', 'page_2']);
+});
+
+test('same-origin iframe docs and navigation redirects do not open pages', () => {
+  const tap = new HarTap();
+  tap.mainFrameId = 'F0';
+  run(tap, { id: '1', url: 'https://example.com/', frameId: 'F0' });
+  run(tap, { id: '2', url: 'https://example.com/embed', frameId: 'IF1',   // iframe doc on the root session
+    wallTime: T0 + 0.2, ts: M0 + 0.2, timing: { ...fullTiming(), requestTime: M0 + 0.2 }, finishTs: M0 + 0.3 });
+  assert.equal(tap.pages.length, 1);
+  tap.requestWillBeSent({ requestId: '3', timestamp: M0 + 2, wallTime: T0 + 2, frameId: 'F0',
+    documentURL: 'https://example.com/old',
+    request: { url: 'https://example.com/old', method: 'GET', headers: {} }, type: 'Document' });
+  tap.requestWillBeSent({ requestId: '3', timestamp: M0 + 2.1, wallTime: T0 + 2.1, frameId: 'F0',
+    documentURL: 'https://example.com/new',
+    request: { url: 'https://example.com/new', method: 'GET', headers: {} }, type: 'Document',
+    redirectResponse: { status: 302, statusText: 'Found', headers: { location: '/new' }, protocol: 'h2',
+      timing: { ...fullTiming(), requestTime: M0 + 2 } } });
+  assert.equal(tap.pages.length, 2);         // the redirect continuation must not open page_3
+  tap.responseReceived({ requestId: '3', response: { status: 200, statusText: 'OK', headers: {},
+    mimeType: 'text/html', protocol: 'h2', timing: { ...fullTiming(), requestTime: M0 + 2.1 } } });
+  tap.loadingFinished({ requestId: '3', timestamp: M0 + 2.4, encodedDataLength: 500 });
+  const refOf = (part) => tap.entries.find((e) => e.request.url.includes(part)).pageref;
+  assert.equal(refOf('/embed'), 'page_1');
+  assert.equal(refOf('/old'), 'page_2');
+  assert.equal(refOf('/new'), 'page_2');
+});
+
+test('a request started before a navigation keeps its original pageref', () => {
+  const tap = new HarTap();
+  tap.mainFrameId = 'F0';
+  run(tap, { id: '1', url: 'https://example.com/', frameId: 'F0' });
+  tap.requestWillBeSent({ requestId: '9', timestamp: M0 + 0.5, wallTime: T0 + 0.5, frameId: 'F0',
+    documentURL: 'https://example.com/',
+    request: { url: 'https://example.com/api/slow', method: 'GET', headers: {} }, type: 'XHR' });
+  run(tap, { id: '2', url: 'https://example.com/next', frameId: 'F0',
+    wallTime: T0 + 1, ts: M0 + 1, timing: { ...fullTiming(), requestTime: M0 + 1 }, finishTs: M0 + 1.2 });
+  tap.responseReceived({ requestId: '9', response: { status: 200, statusText: 'OK', headers: {},
+    mimeType: 'application/json', protocol: 'h2', timing: { ...fullTiming(), requestTime: M0 + 0.5 } } });
+  const e = tap.loadingFinished({ requestId: '9', timestamp: M0 + 1.5, encodedDataLength: 10 });
+  assert.equal(e.pageref, 'page_1');         // attribution is by request START, not finish
 });
 
 test('byteLen / b64Size', () => {
